@@ -6,6 +6,7 @@ const App = (() => {
   let currentQuestions = [];
   let currentQuestionIndex = 0;
   let studentAnswers = [];
+  let ocrConfidences = [];
   let isPracticing = false;
   let isErrorBookPractice = false;
 
@@ -45,7 +46,13 @@ const App = (() => {
     $('btn-undo').addEventListener('click', () => CanvasManager.undo());
     $('btn-clear').addEventListener('click', () => {
       if (currentQuestionIndex >= 0) {
-        CanvasManager.clearCurrentArea(currentQuestionIndex);
+        // 清除当前题目的所有格子
+        const areas = CanvasManager.getAnswerAreas();
+        areas.forEach(a => {
+          if (a.questionIndex === currentQuestionIndex) {
+            CanvasManager.clearCurrentArea(a.index);
+          }
+        });
       }
     });
 
@@ -155,13 +162,85 @@ const App = (() => {
     Timer.stop();
   }
 
+  /**
+   * 根据题目类型生成数字格子HTML
+   */
+  function _renderAnswerCells(q) {
+    const type = q.answerType;
+    if (type === 'fraction') {
+      // 分子2格 + / + 分母2格
+      return `<div class="answer-cells">
+        <span class="digit-cell" data-cell="${0}"></span>
+        <span class="digit-cell" data-cell="${1}"></span>
+        <span class="cell-separator">/</span>
+        <span class="digit-cell" data-cell="${2}"></span>
+        <span class="digit-cell" data-cell="${3}"></span>
+      </div>`;
+    }
+    if (type === 'remainder') {
+      // 商2格 + ... + 余数2格
+      return `<div class="answer-cells">
+        <span class="digit-cell" data-cell="${0}"></span>
+        <span class="digit-cell" data-cell="${1}"></span>
+        <span class="cell-separator">…</span>
+        <span class="digit-cell" data-cell="${2}"></span>
+        <span class="digit-cell" data-cell="${3}"></span>
+      </div>`;
+    }
+    if (type === 'decimal') {
+      // 3格数字 + 小数点 + 1格
+      return `<div class="answer-cells">
+        <span class="digit-cell" data-cell="${0}"></span>
+        <span class="digit-cell" data-cell="${1}"></span>
+        <span class="cell-separator">.</span>
+        <span class="digit-cell" data-cell="${2}"></span>
+      </div>`;
+    }
+    // 整数：根据年级动态决定格子数
+    const grade = q.grade || Storage.getSettings().grade;
+    const cellCount = grade <= 2 ? 2 : grade <= 4 ? 3 : 3;
+    let cells = '';
+    for (let c = 0; c < cellCount; c++) {
+      cells += `<span class="digit-cell" data-cell="${c}"></span>`;
+    }
+    return `<div class="answer-cells">${cells}</div>`;
+  }
+
+  /**
+   * 将逐格OCR识别的数字组装成完整答案
+   */
+  function _assembleAnswer(digits, answerType) {
+    const d = digits.map(s => (s || '').trim());
+    if (answerType === 'fraction') {
+      const num = (d[0] || '') + (d[1] || '');
+      const den = (d[2] || '') + (d[3] || '');
+      if (!num && !den) return '';
+      return `${num || '0'}/${den || '0'}`;
+    }
+    if (answerType === 'remainder') {
+      const q = (d[0] || '') + (d[1] || '');
+      const r = (d[2] || '') + (d[3] || '');
+      if (!q && !r) return '';
+      return `${q || '0'}...${r || '0'}`;
+    }
+    if (answerType === 'decimal') {
+      const intPart = (d[0] || '') + (d[1] || '');
+      const decPart = d[2] || '';
+      if (!intPart && !decPart) return '';
+      return `${intPart || '0'}.${decPart || '0'}`;
+    }
+    // integer
+    const result = d.join('');
+    return result || '';
+  }
+
   function renderQuestions() {
     const container = $('questions-container');
     container.innerHTML = currentQuestions.map((q, i) => `
       <div class="question-item" data-index="${i}" id="question-${i}">
         <span class="question-number">${i + 1}.</span>
         <span class="question-text">${q.question}</span>
-        <span class="answer-box" id="answer-box-${i}"></span>
+        ${_renderAnswerCells(q)}
       </div>
     `).join('');
 
@@ -202,74 +281,135 @@ const App = (() => {
     if (!isPracticing) return;
     stopPractice();
 
-    // 显示加载状态
     $('btn-submit').disabled = true;
     $('btn-submit').textContent = '识别中...';
 
     const areas = CanvasManager.getAnswerAreas();
     const canvasEl = CanvasManager.canvas;
+    ocrConfidences = new Array(currentQuestions.length).fill(0);
+    studentAnswers = new Array(currentQuestions.length).fill('');
 
-    // OCR识别每道题
-    for (let i = 0; i < currentQuestions.length; i++) {
-      // 更新进度
-      $('btn-submit').textContent = `识别 ${i + 1}/${currentQuestions.length}...`;
+    // 逐题逐格 OCR
+    for (let q = 0; q < currentQuestions.length; q++) {
+      $('btn-submit').textContent = `识别 ${q + 1}/${currentQuestions.length}...`;
+      const qCells = areas.filter(a => a.questionIndex === q);
+      const digits = [];
+      let totalConf = 0;
+      let cellCount = 0;
 
-      if (AnswerDetect.hasInkInArea(canvasEl, areas[i])) {
-        const cropped = AnswerDetect.cropArea(canvasEl, areas[i]);
-        const result = await OCR.recognize(cropped, currentQuestions[i].answerType);
-        studentAnswers[i] = OCR.parseResult(result.text, currentQuestions[i].answerType) || '';
+      for (const cell of qCells) {
+        if (AnswerDetect.hasInkInArea(canvasEl, cell)) {
+          const cropped = AnswerDetect.cropArea(canvasEl, cell);
+          const result = await OCR.recognize(cropped, 'integer');
+          digits[cell.cellIndex] = OCR.parseResult(result.text, 'integer') || '';
+          totalConf += result.confidence || 0;
+          cellCount++;
+        } else {
+          digits[cell.cellIndex] = '';
+        }
       }
+
+      studentAnswers[q] = _assembleAnswer(digits, currentQuestions[q].answerType);
+      ocrConfidences[q] = cellCount > 0 ? totalConf / cellCount : 0;
     }
 
-    // 显示 OCR 结果预览，允许用户手动修正
     showOCRReview();
   }
 
   /**
-   * 显示 OCR 识别结果，允许用户手动修正
+   * OCR 识别结果确认页 —— 识别不准的题目可点击“重写”回到画布重写
    */
   function showOCRReview() {
     showPage('results');
     const container = $('results-container');
-
+  
     container.innerHTML = `
       <div class="ocr-review">
         <h3 style="text-align:center;padding:16px;color:var(--text);">识别结果确认</h3>
         <p style="text-align:center;color:var(--text-light);font-size:0.9em;padding:0 16px 12px;">
-          点击答案可以手动修改识别错误的内容
+          请检查识别结果，不确定的可点击"重写"回到画布重写
         </p>
         <div class="ocr-review-list">
-          ${currentQuestions.map((q, i) => `
+          ${currentQuestions.map((q, i) => {
+            const conf = ocrConfidences[i] || 0;
+            const ans = studentAnswers[i] || '';
+            const lowConf = (conf < 60 && ans !== '') || (ans === '');
+            return `
             <div class="ocr-review-item">
               <span class="ocr-review-num">${i + 1}.</span>
               <span class="ocr-review-q">${q.question}</span>
-              <input class="ocr-review-input" 
-                     data-index="${i}" 
-                     value="${studentAnswers[i] || ''}" 
-                     placeholder="未识别"
-                     inputmode="decimal">
-            </div>
-          `).join('')}
+              <span class="ocr-review-input ${lowConf ? 'low-confidence' : ''}"
+                    style="padding:8px 12px;border:2px solid var(--border);border-radius:8px;min-width:80px;text-align:center;font-weight:600;font-size:1.1em;">
+                ${ans || '—'}
+              </span>
+              <button class="ocr-rewrite-btn" data-index="${i}">重写</button>
+            </div>`;
+          }).join('')}
         </div>
         <div class="results-actions">
           <button class="btn-primary" id="btn-confirm-ocr">确认批改</button>
         </div>
       </div>
     `;
-
-    // 绑定输入框修改事件
-    container.querySelectorAll('.ocr-review-input').forEach(input => {
-      input.addEventListener('change', (e) => {
+  
+    // 重写按钮：回到练习页，清空该题所有格子，高亮该题
+    container.querySelectorAll('.ocr-rewrite-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
         const idx = parseInt(e.target.dataset.index);
-        studentAnswers[idx] = e.target.value.trim();
-      });
-      input.addEventListener('input', (e) => {
-        const idx = parseInt(e.target.dataset.index);
-        studentAnswers[idx] = e.target.value.trim();
+        rewriteQuestion(idx);
       });
     });
-
+  
     $('btn-confirm-ocr').addEventListener('click', doGrading);
+  }
+
+  /**
+   * 回到练习页重写某一题（清除该题所有格子）
+   */
+  function rewriteQuestion(idx) {
+    showPage('practice');
+    requestAnimationFrame(() => {
+      CanvasManager.init($('drawing-canvas'));
+      // 清除该题所有格子
+      const areas = CanvasManager.getAnswerAreas();
+      areas.forEach(a => {
+        if (a.questionIndex === idx) {
+          CanvasManager.clearCurrentArea(a.index);
+        }
+      });
+      renderQuestions();
+      setTimeout(() => {
+        CanvasManager.resize();
+        const questionEls = $('questions-container').querySelectorAll('.question-item');
+        const newAreas = AnswerDetect.calcAnswerAreas([...questionEls], $('questions-container'));
+        CanvasManager.setAnswerAreas(newAreas);
+        highlightQuestion(idx);
+        $('btn-submit').disabled = false;
+        $('btn-submit').textContent = '重新提交';
+        $('btn-submit').onclick = async () => {
+          const areas2 = CanvasManager.getAnswerAreas();
+          const canvasEl = CanvasManager.canvas;
+          const qCells = areas2.filter(a => a.questionIndex === idx);
+          const digits = [];
+          let totalConf = 0;
+          let cellCount = 0;
+          for (const cell of qCells) {
+            if (AnswerDetect.hasInkInArea(canvasEl, cell)) {
+              const cropped = AnswerDetect.cropArea(canvasEl, cell);
+              const result = await OCR.recognize(cropped, 'integer');
+              digits[cell.cellIndex] = OCR.parseResult(result.text, 'integer') || '';
+              totalConf += result.confidence || 0;
+              cellCount++;
+            } else {
+              digits[cell.cellIndex] = '';
+            }
+          }
+          studentAnswers[idx] = _assembleAnswer(digits, currentQuestions[idx].answerType);
+          ocrConfidences[idx] = cellCount > 0 ? totalConf / cellCount : 0;
+          showOCRReview();
+        };
+      }, 200);
+    });
   }
 
   /**
