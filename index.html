@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>小皮球口算练习</title>
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Tesseract.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+
+  <!-- ====== 首页 ====== -->
+  <div class="page active" id="page-home">
+    <div class="home-content">
+      <div class="home-title">小皮球口算</div>
+      <div class="home-subtitle">每天练一练，数学变简单</div>
+      <div class="home-info" id="home-info">
+        <div class="home-info-card">
+          <div class="label">年级</div>
+          <div class="value" id="home-grade">1年级</div>
+        </div>
+        <div class="home-info-card">
+          <div class="label">难度</div>
+          <div class="value" id="home-difficulty">中</div>
+        </div>
+        <div class="home-info-card">
+          <div class="label">题量</div>
+          <div class="value" id="home-count">10题</div>
+        </div>
+        <div class="home-info-card">
+          <div class="label">限时</div>
+          <div class="value" id="home-time">5分钟</div>
+        </div>
+      </div>
+      <button class="btn-start" id="btn-start">开始练习</button>
+      <div class="home-bottom-btns">
+        <button id="btn-error-book">错题本 (<span id="home-error-count">0</span>)</button>
+        <button id="btn-parent">家长模式</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== 练习页 ====== -->
+  <div class="page" id="page-practice">
+    <div id="top-bar">
+      <div class="left-group">
+        <button id="btn-home">退出</button>
+      </div>
+      <div class="center-group">
+        <div id="timer-display">05:00</div>
+      </div>
+      <div class="right-group">
+        <button id="btn-submit">提交</button>
+      </div>
+    </div>
+
+    <div class="practice-area">
+      <div id="questions-container"></div>
+      <canvas id="drawing-canvas"></canvas>
+    </div>
+
+    <div id="bottom-toolbar">
+      <button class="tool-btn" id="btn-tool-pen" title="笔">✏️</button>
+      <button class="tool-btn" id="btn-tool-eraser" title="橡皮擦">🧽</button>
+      <button class="tool-btn" id="btn-undo" title="撤销">↩️</button>
+      <button class="tool-btn" id="btn-clear" title="清除当前">🗑️</button>
+    </div>
+  </div>
+
+  <!-- ====== 结果页 ====== -->
+  <div class="page" id="page-results">
+    <div id="top-bar-results" style="display:flex;align-items:center;padding:8px 16px;background:var(--card-bg);box-shadow:0 1px 4px rgba(0,0,0,0.06);flex-shrink:0;">
+      <h2 style="font-size:1.2em;">练习结果</h2>
+    </div>
+    <div id="results-container" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;"></div>
+  </div>
+
+  <!-- ====== 错题本页 ====== -->
+  <div class="page" id="page-error-book">
+    <div class="error-book-header">
+      <h2>错题本 (<span id="error-book-count">0</span>)</h2>
+      <div class="error-book-actions">
+        <button id="btn-error-practice">练习错题</button>
+        <button id="btn-error-clear">清空</button>
+        <button id="btn-error-back">返回</button>
+      </div>
+    </div>
+    <div id="error-book-list" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 16px 16px;"></div>
+  </div>
+
+  <!-- ====== 家长登录页 ====== -->
+  <div class="page" id="page-parent-login">
+    <div class="login-box">
+      <h2>家长模式</h2>
+      <input type="password" id="parent-password-input" placeholder="输入密码" maxlength="6" inputmode="numeric">
+      <button id="btn-parent-verify">进入</button>
+      <br>
+      <button id="btn-parent-back">返回首页</button>
+    </div>
+  </div>
+
+  <!-- ====== 家长面板 ====== -->
+  <div class="page" id="page-parent-panel">
+    <div class="parent-panel-header">
+      <h2>家长控制台</h2>
+      <div class="parent-tabs">
+        <button id="btn-parent-tab-settings" class="active">练习设置</button>
+        <button id="btn-parent-tab-report">学习报告</button>
+      </div>
+      <button id="btn-parent-logout" style="border:none;background:none;color:var(--text-light);cursor:pointer;">退出</button>
+    </div>
+    <div id="parent-content" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;"></div>
+  </div>
+
+  <!-- JS模块加载顺序很重要 -->
+  <script src="js/storage.js"></script>
+  <script src="js/questions.js"></script>
+  <script src="js/timer.js"></script>
+  <script src="js/canvas.js"></script>
+  <script src="js/answer-detect.js"></script>
+  <script src="js/ocr.js"></script>
+  <script src="js/grading.js"></script>
+  <script src="js/error-book.js"></script>
+  <script src="js/parent.js"></script>
+  <script src="js/app.js"></script>
+
+  <script>
+    // 首页信息显示
+    function updateHomeInfo() {
+      const s = Storage.getSettings();
+      const diffMap = { easy: '易', medium: '中', hard: '难', random: '随机' };
+      document.getElementById('home-grade').textContent = s.grade + '年级';
+      document.getElementById('home-difficulty').textContent = diffMap[s.difficulty] || '中';
+      document.getElementById('home-count').textContent = s.questionCount + '题';
+      document.getElementById('home-time').textContent = s.timeLimit + '分钟';
+      document.getElementById('home-error-count').textContent = Storage.getErrorBook().length;
+    }
+    updateHomeInfo();
+
+    // 更新首页信息每次切换
+    const origShowPage = App.showPage;
+    App.showPage = function(page) {
+      origShowPage(page);
+      if (page === 'home') updateHomeInfo();
+    };
+  </script>
+</body>
+</html>
