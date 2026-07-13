@@ -12,6 +12,9 @@ const CanvasManager = (() => {
   let wasEraserBeforeLongPress = false;
   let answerAreas = [];   // [{x, y, w, h, index}] 答题区坐标
   let currentAreaIndex = -1;
+  let boundDocMove = null;   // document级事件引用
+  let boundDocUp = null;
+  let useTouchFallback = false;  // iOS触摸兜底
   const MAX_UNDO = 50;
 
   function init(canvasEl) {
@@ -40,11 +43,27 @@ const CanvasManager = (() => {
   }
 
   function bindEvents() {
+    // iOS Safari 上 PointerEvent 可能不稳定，用 touch 兜底
+    useTouchFallback = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
     canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointerleave', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
+
+    // document 级追踪，不依赖 setPointerCapture
+    boundDocMove = onPointerMove;
+    boundDocUp = onPointerUp;
+    document.addEventListener('pointermove', boundDocMove);
+    document.addEventListener('pointerup', boundDocUp);
+
+    if (useTouchFallback) {
+      canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+      document.addEventListener('touchmove', onTouchMove, { passive: false });
+      document.addEventListener('touchend', onTouchEnd);
+      document.addEventListener('touchcancel', onTouchEnd);
+    }
+
     // 禁用长按菜单
     canvas.addEventListener('contextmenu', e => e.preventDefault());
     // 禁止触摸滚动
@@ -74,6 +93,7 @@ const CanvasManager = (() => {
 
   function onPointerDown(e) {
     e.preventDefault();
+    if (isDrawing) return; // 防止双重触发（iOS touch+pointer同时触发）
     const pos = getPos(e);
 
     // 长按检测（0.5秒切换橡皮擦）
@@ -106,6 +126,41 @@ const CanvasManager = (() => {
     };
 
     canvas.setPointerCapture(e.pointerId);
+  }
+
+  /**
+   * iOS 触摸兜底：当 PointerEvent 不可用时，用 TouchEvent 代替
+   */
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (isDrawing) return;
+    const touch = e.touches[0];
+    const fake = {
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+      pressure: touch.force || 0.5,
+      pointerId: touch.identifier,
+      preventDefault: () => {},
+    };
+    onPointerDown(fake);
+  }
+
+  function onTouchMove(e) {
+    if (!isDrawing) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const fake = {
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+      pressure: touch.force || 0.5,
+      preventDefault: () => {},
+    };
+    onPointerMove(fake);
+  }
+
+  function onTouchEnd(e) {
+    if (!isDrawing) return;
+    onPointerUp({ preventDefault: () => {} });
   }
 
   function onPointerMove(e) {
