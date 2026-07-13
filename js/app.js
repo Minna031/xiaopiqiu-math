@@ -20,8 +20,32 @@ const App = (() => {
     showPage('home');
     bindGlobalEvents();
     initDigitPicker();
+    updateAIStatus();
     // 预加载OCR
-    setTimeout(() => OCR.init(), 1000);
+    setTimeout(() => OCR.init(), 500);
+    // 定期检查 AI 状态
+    setInterval(updateAIStatus, 2000);
+  }
+
+  function updateAIStatus() {
+    const el = $('ai-status');
+    if (!el) return;
+    const s = DigitRecognizer.getStatus();
+    if (s === 'ready') {
+      el.innerHTML = '✅ AI 手写识别引擎已就绪';
+      el.style.color = '#4CAF50';
+    } else if (s === 'loading') {
+      el.innerHTML = '⏳ AI 模型加载中...';
+      el.style.color = '#FF9800';
+    } else if (s === 'training') {
+      el.innerHTML = '⏳ AI 模型训练中（首次约15秒）...';
+      el.style.color = '#FF9800';
+    } else if (s === 'failed') {
+      el.innerHTML = '⚠️ AI 加载失败，将使用备用识别';
+      el.style.color = '#F44336';
+    } else {
+      el.textContent = '';
+    }
   }
 
   function bindGlobalEvents() {
@@ -137,6 +161,10 @@ const App = (() => {
     isPracticing = true;
     currentQuestionIndex = 0;
     studentAnswers = new Array(currentQuestions.length).fill('');
+    studentCellDigits = currentQuestions.map((q) => {
+      const cellCount = _getCellCount(q);
+      return new Array(cellCount).fill('');
+    });
 
     showPage('practice');
 
@@ -146,6 +174,9 @@ const App = (() => {
       CanvasManager.clearAll();
       CanvasManager.setEraserMode(false);
       renderQuestions();
+
+      // 注册实时识别回调
+      CanvasManager.setOnStrokeEnd(onCellStrokeEnd);
 
       // 启动计时器
       Timer.start(settings.timeLimit,
@@ -280,24 +311,75 @@ const App = (() => {
     currentQuestionIndex = index;
   }
 
+  /**
+   * 实时识别：笔画结束后立即识别当前格子
+   * 如果置信度高，将手写笔迹替换为印刷体数字
+   */
+  function onCellStrokeEnd(areaIndex) {
+    if (!DigitRecognizer.isReady()) return;
+    if (!isPracticing) return;
+
+    const areas = CanvasManager.getAnswerAreas();
+    const area = areas.find(a => a.index === areaIndex);
+    if (!area) return;
+
+    const qIdx = area.questionIndex;
+    const cIdx = area.cellIndex;
+
+    // 检查是否有笔迹
+    if (!CanvasManager.hasStrokesInArea(areaIndex)) return;
+
+    // 获取该区域的画布并识别
+    const cellCanvas = CanvasManager.getAreaCanvas(areaIndex);
+    if (!cellCanvas) return;
+
+    const result = DigitRecognizer.predict(cellCanvas);
+
+    if (result.digit !== null && result.confidence >= 70) {
+      // 高置信度：存储数字并显示印刷体
+      studentCellDigits[qIdx][cIdx] = result.digit;
+      CanvasManager.drawPrintedDigit(areaIndex, result.digit);
+      _highlightCell(qIdx, cIdx, 'recognized');
+    } else if (result.digit !== null && result.confidence >= 40) {
+      // 低置信度：存储数字但保留手写
+      studentCellDigits[qIdx][cIdx] = result.digit;
+      _highlightCell(qIdx, cIdx, 'uncertain');
+    } else {
+      // 无法识别
+      studentCellDigits[qIdx][cIdx] = '';
+      _highlightCell(qIdx, cIdx, '');
+    }
+  }
+
+  /**
+   * 更新格子的 DOM 样式
+   */
+  function _highlightCell(qIdx, cIdx, state) {
+    const qEl = document.getElementById(`question-${qIdx}`);
+    if (!qEl) return;
+    const cells = qEl.querySelectorAll('.digit-cell');
+    const cell = cells[cIdx];
+    if (!cell) return;
+    cell.classList.remove('recognized', 'uncertain');
+    if (state) cell.classList.add(state);
+  }
+
   // ---- 提交与批改 ----
   async function submitPractice() {
     if (!isPracticing) return;
     stopPractice();
 
     $('btn-submit').disabled = true;
-    $('btn-submit').textContent = '识别中...';
+    const nnReady = DigitRecognizer.isReady();
+    $('btn-submit').textContent = nnReady ? '🧠 识别中...' : '识别中...';
 
     const areas = CanvasManager.getAnswerAreas();
     const canvasEl = CanvasManager.canvas;
     ocrConfidences = new Array(currentQuestions.length).fill(0);
     studentAnswers = new Array(currentQuestions.length).fill('');
-    studentCellDigits = currentQuestions.map((q) => {
-      const cellCount = _getCellCount(q);
-      return new Array(cellCount).fill('');
-    });
+    // studentCellDigits 已在 beginPracticeSession 中初始化，实时识别已填充部分格子
 
-    // 逐题逐格 OCR
+    // 逐题逐格识别
     for (let q = 0; q < currentQuestions.length; q++) {
       $('btn-submit').textContent = `识别 ${q + 1}/${currentQuestions.length}...`;
       const qCells = areas.filter(a => a.questionIndex === q);
@@ -305,6 +387,13 @@ const App = (() => {
       let cellCount = 0;
 
       for (const cell of qCells) {
+        // 如果实时识别已填充该格子，跳过 OCR
+        if (studentCellDigits[q][cell.cellIndex] !== '') {
+          totalConf += 80; // 实时识别的置信度设为80
+          cellCount++;
+          continue;
+        }
+        // 未识别的格子：用 Tesseract 回退
         if (AnswerDetect.hasInkInArea(canvasEl, cell)) {
           const cropped = AnswerDetect.cropArea(canvasEl, cell);
           const result = await OCR.recognize(cropped, 'integer');
@@ -459,6 +548,9 @@ const App = (() => {
    */
   function rewriteQuestion(idx) {
     showPage('practice');
+    // 清空该题的已识别数字
+    studentCellDigits[idx] = new Array(_getCellCount(currentQuestions[idx])).fill('');
+
     requestAnimationFrame(() => {
       CanvasManager.init($('drawing-canvas'));
       // 清除该题所有格子
@@ -474,18 +566,25 @@ const App = (() => {
         const questionEls = $('questions-container').querySelectorAll('.question-item');
         const newAreas = AnswerDetect.calcAnswerAreas([...questionEls], $('questions-container'));
         CanvasManager.setAnswerAreas(newAreas);
+        // 重新注册实时识别回调
+        CanvasManager.setOnStrokeEnd(onCellStrokeEnd);
         highlightQuestion(idx);
         $('btn-submit').disabled = false;
         $('btn-submit').textContent = '重新提交';
         $('btn-submit').onclick = async () => {
+          $('btn-submit').textContent = '识别中...';
           const areas2 = CanvasManager.getAnswerAreas();
           const canvasEl = CanvasManager.canvas;
           const qCells = areas2.filter(a => a.questionIndex === idx);
-          studentCellDigits[idx] = new Array(_getCellCount(currentQuestions[idx])).fill('');
           const digits = studentCellDigits[idx];
           let totalConf = 0;
           let cellCount = 0;
           for (const cell of qCells) {
+            if (digits[cell.cellIndex] !== '') {
+              totalConf += 80;
+              cellCount++;
+              continue;
+            }
             if (AnswerDetect.hasInkInArea(canvasEl, cell)) {
               const cropped = AnswerDetect.cropArea(canvasEl, cell);
               const result = await OCR.recognize(cropped, 'integer');

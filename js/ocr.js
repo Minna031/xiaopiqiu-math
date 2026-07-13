@@ -1,147 +1,107 @@
 /**
- * 手写识别模块 - 封装 Tesseract.js
- * 优化：多次识别投票、按答案类型设置白名单、置信度筛选
+ * 手写识别模块 - 双引擎：神经网络(MNIST) + Tesseract(回退)
+ * 优先使用 DigitRecognizer（专门识别手写数字，准确率 >95%）
+ * Tesseract 作为后备方案
  */
 const OCR = (() => {
-  let workers = {};  // 按白名单缓存 worker
+  let worker = null;
   let isReady = false;
 
-  const WHITELISTS = {
-    integer:   '0123456789-',
-    decimal:   '0123456789.-',
-    fraction:  '0123456789/',
-    remainder: '0123456789',
-  };
+  async function init() {
+    // 初始化神经网络识别器（在后台训练/加载）
+    DigitRecognizer.init((epoch, current, total) => {
+      const pct = Math.round((epoch * total + current) / (3 * total) * 100);
+      console.log(`[OCR] 神经网络训练中: ${pct}%`);
+    }).then(ok => {
+      if (ok) console.log('[OCR] 手写识别引擎就绪 (Neural Network)');
+      else console.warn('[OCR] 神经网络初始化失败，将使用 Tesseract');
+    }).catch(e => {
+      console.warn('[OCR] Neural network init error:', e);
+    });
 
-  async function _getWorker(whitelist) {
-    const key = whitelist || 'default';
-    if (workers[key]) return workers[key];
+    // 同时初始化 Tesseract 作为后备
     try {
-      const worker = await Tesseract.createWorker('eng', 1, {
-        logger: () => {}
-      });
+      worker = await Tesseract.createWorker('eng', 1, { logger: () => {} });
       await worker.setParameters({
-        tessedit_char_whitelist: whitelist || '0123456789',
-        tessedit_pageseg_mode: '7',
+        tessedit_char_whitelist: '0123456789',
+        tessedit_pageseg_mode: '10',
         preserve_interword_spaces: '0',
       });
-      workers[key] = worker;
-      return worker;
+      isReady = true;
     } catch (e) {
       console.error('OCR worker create error:', e);
-      return null;
     }
   }
 
-  async function init() {
-    if (isReady) return;
-    await _getWorker('0123456789-./');
-    isReady = true;
-  }
-
   /**
-   * 多次识别并投票选出最佳结果
+   * 识别单个数字格子中的手写数字
+   * 优先使用神经网络，回退到 Tesseract
    * @param {HTMLCanvasElement} canvasEl - 已预处理的canvas
-   * @param {string} answerType - integer/decimal/fraction/remainder
-   * @returns {{ text: string, confidence: number }}
+   * @param {string} answerType - 答案类型（保留兼容性）
+   * @returns {{ text: string, confidence: number, engine: string }}
    */
   async function recognize(canvasEl, answerType) {
-    const whitelist = WHITELISTS[answerType] || '0123456789';
-    const worker = await _getWorker(whitelist);
-    if (!worker) return { text: '', confidence: 0 };
-
-    const results = [];
-    const psmModes = ['7', '8', '10'];
-
-    for (const psm of psmModes) {
-      try {
-        await worker.setParameters({
-          tessedit_char_whitelist: whitelist,
-          tessedit_pageseg_mode: psm,
-          preserve_interword_spaces: '0',
-        });
-        const { data } = await worker.recognize(canvasEl);
-        const text = data.text.trim();
-        if (text) {
-          results.push({ text, confidence: data.confidence || 0, psm });
-        }
-      } catch (e) { /* skip */ }
+    // 优先：神经网络识别
+    if (DigitRecognizer.isReady()) {
+      const nnResult = DigitRecognizer.predict(canvasEl);
+      if (nnResult.digit !== null) {
+        return {
+          text: nnResult.digit,
+          confidence: nnResult.confidence,
+          engine: 'nn',
+        };
+      }
     }
 
-    if (results.length === 0) return { text: '', confidence: 0 };
+    // 回退：Tesseract
+    if (worker) {
+      try {
+        const results = [];
+        for (const psm of ['10', '8']) {
+          await worker.setParameters({
+            tessedit_char_whitelist: '0123456789',
+            tessedit_pageseg_mode: psm,
+          });
+          const { data } = await worker.recognize(canvasEl);
+          const text = data.text.trim().replace(/\s+/g, '');
+          if (text) {
+            results.push({ text, confidence: data.confidence || 0, engine: 'tesseract' });
+          }
+        }
+        if (results.length > 0) {
+          results.sort((a, b) => b.confidence - a.confidence);
+          return results[0];
+        }
+      } catch (e) {
+        console.error('OCR recognize error:', e);
+      }
+    }
 
-    // 投票：同结果多次优先，同等票数选置信度高
-    const voteMap = {};
-    results.forEach(r => {
-      const key = r.text.replace(/\s+/g, '');
-      if (!voteMap[key]) voteMap[key] = { text: key, votes: 0, totalConf: 0 };
-      voteMap[key].votes++;
-      voteMap[key].totalConf += r.confidence;
-    });
-
-    const sorted = Object.values(voteMap).sort((a, b) => {
-      if (b.votes !== a.votes) return b.votes - a.votes;
-      return (b.totalConf / b.votes) - (a.totalConf / a.votes);
-    });
-
-    const best = sorted[0];
-    return { text: best.text, confidence: Math.round(best.totalConf / best.votes) };
+    return { text: '', confidence: 0, engine: 'none' };
   }
 
   /**
-   * 解析识别结果
+   * 解析单数字识别结果
    */
   function parseResult(rawText, answerType) {
     if (!rawText) return null;
     let text = rawText.replace(/\s+/g, '').trim();
 
-    if (answerType === 'integer' || answerType === 'remainder') {
-      text = text.replace(/[Oo]/g, '0')
-                 .replace(/[Il]/g, '1')
-                 .replace(/[Ss]/g, '5')
-                 .replace(/B/g, '8')
-                 .replace(/Z/g, '2');
-    }
+    // 常见误识别修正（仅用于 Tesseract 回退）
+    text = text.replace(/[Oo]/g, '0')
+               .replace(/[Il|]/g, '1')
+               .replace(/[Ss]/g, '5')
+               .replace(/B/g, '8')
+               .replace(/Z/g, '2')
+               .replace(/G/g, '6')
+               .replace(/q/g, '9')
+               .replace(/b/g, '6');
 
-    if (answerType === 'integer') {
-      const match = text.match(/-?\d+/);
-      return match ? match[0] : null;
-    }
-
-    if (answerType === 'decimal') {
-      let cleaned = text.replace(/[^0-9.\-]/g, '');
-      const parts = cleaned.split('.');
-      if (parts.length > 2) cleaned = parts[0] + '.' + parts.slice(1).join('');
-      const match = cleaned.match(/-?\d+\.?\d*/);
-      if (match) return String(parseFloat(match[0]));
-      const intMatch = cleaned.match(/-?\d+/);
-      return intMatch ? String(parseFloat(intMatch[0])) : null;
-    }
-
-    if (answerType === 'fraction') {
-      let cleaned = text.replace(/[^0-9\/\-]/g, '');
-      const match = cleaned.match(/(-?\d+)\/(-?\d+)/);
-      if (match) return `${match[1]}/${match[2]}`;
-      const intMatch = cleaned.match(/-?\d+/);
-      return intMatch ? intMatch[0] : null;
-    }
-
-    if (answerType === 'remainder') {
-      let cleaned = text.replace(/[^0-9]/g, '');
-      if (cleaned.length >= 2) {
-        for (let splitAt = 1; splitAt < cleaned.length; splitAt++) {
-          const q = cleaned.substring(0, splitAt);
-          const r = cleaned.substring(splitAt);
-          if (q && r) return `${parseInt(q)}...${parseInt(r)}`;
-        }
-      }
-      return cleaned || null;
-    }
-
-    return text || null;
+    const match = text.match(/\d/);
+    return match ? match[0] : null;
   }
 
-  function getReady() { return isReady; }
+  function getReady() { return isReady || DigitRecognizer.isReady(); }
 
   return { init, recognize, parseResult, getReady };
 })();

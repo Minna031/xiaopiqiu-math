@@ -1,12 +1,11 @@
 /**
  * 答题区检测模块 - 根据题目布局计算坐标、区域裁剪
- * 图像预处理：Otsu阈值 + 自动裁剪 + 笔画膨胀 + 去噪 + 高倍放大
+ * 图像预处理：高质量放大 + 对比度增强 + 轻度锐化（专为手写数字优化）
  */
 const AnswerDetect = (() => {
 
   /**
    * 根据题目DOM元素计算每个数字格子的答题区坐标
-   * 返回扁平数组，每项代表一个数字格子
    */
   function calcAnswerAreas(questionEls, container) {
     const practiceArea = container.closest('.practice-area') || container.parentElement;
@@ -35,7 +34,7 @@ const AnswerDetect = (() => {
     for (const area of areas) {
       if (x >= area.x && x <= area.x + area.w &&
           y >= area.y && y <= area.y + area.h) {
-        return area.index;  // 返回扁平全局索引
+        return area.index;
       }
     }
     return -1;
@@ -43,193 +42,95 @@ const AnswerDetect = (() => {
 
   /**
    * 从canvas裁剪指定区域的图像用于OCR
-   * 流程：裁剪 → Otsu二值化 → 自动找笔画边界 → 裁剪+留白 → 膨胀加粗 → 放大 → 去噪
+   * 新流程：裁剪 → 高质量放大 → 对比度增强 → 轻度锐化
+   * （不再使用破坏性的膨胀，保留手写笔画细节）
    */
   function cropArea(canvas, area) {
     const dpr = window.devicePixelRatio || 1;
+    const pad = 3;
+    const sx = Math.max(0, (area.x - pad) * dpr);
+    const sy = Math.max(0, (area.y - pad) * dpr);
+    const sw = (area.w + pad * 2) * dpr;
+    const sh = (area.h + pad * 2) * dpr;
 
-    // Step 1: 从原始canvas裁剪答题区
-    const outerPad = 4;
-    const sx = Math.max(0, (area.x - outerPad) * dpr);
-    const sy = Math.max(0, (area.y - outerPad) * dpr);
-    const sw = (area.w + outerPad * 2) * dpr;
-    const sh = (area.h + outerPad * 2) * dpr;
-
+    // Step 1: 裁剪原始区域
     const rawCanvas = document.createElement('canvas');
-    rawCanvas.width = sw;
-    rawCanvas.height = sh;
-    const rawCtx = rawCanvas.getContext('2d');
+    rawCanvas.width = Math.round(sw);
+    rawCanvas.height = Math.round(sh);
+    const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
     rawCtx.fillStyle = '#ffffff';
-    rawCtx.fillRect(0, 0, sw, sh);
-    rawCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    rawCtx.fillRect(0, 0, rawCanvas.width, rawCanvas.height);
+    rawCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, rawCanvas.width, rawCanvas.height);
 
-    // Step 2: Otsu二值化 + 找笔画边界
-    const imgData = rawCtx.getImageData(0, 0, sw, sh);
-    const pixels = _toBinary(imgData, sw, sh);
+    // Step 2: 高质量放大到目标尺寸（使用浏览器内置双线性插值）
+    const targetH = 400;
+    const scale = targetH / rawCanvas.height;
+    const targetW = Math.max(Math.round(rawCanvas.width * scale), 150);
 
-    let minX = sw, minY = sh, maxX = 0, maxY = 0;
-    let hasInk = false;
-    for (let y = 0; y < sh; y++) {
-      for (let x = 0; x < sw; x++) {
-        if (pixels[y * sw + x] === 0) { // black = ink
-          hasInk = true;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
+    const scaledCanvas = document.createElement('canvas');
+    scaledCanvas.width = targetW;
+    scaledCanvas.height = targetH;
+    const scaledCtx = scaledCanvas.getContext('2d', { willReadFrequently: true });
+    scaledCtx.fillStyle = '#ffffff';
+    scaledCtx.fillRect(0, 0, targetW, targetH);
+    // imageSmoothingQuality 提供高质量缩放
+    scaledCtx.imageSmoothingEnabled = true;
+    scaledCtx.imageSmoothingQuality = 'high';
+    scaledCtx.drawImage(rawCanvas, 0, 0, targetW, targetH);
 
-    if (!hasInk) {
-      return _makeBlankOutput();
-    }
+    // Step 3: 高对比度处理 — 让笔画更清晰
+    const imgData = scaledCtx.getImageData(0, 0, targetW, targetH);
+    _enhanceContrast(imgData, targetW, targetH);
 
-    // Step 3: 裁剪到笔画区域 + 充足留白(40%)
-    const contentW = maxX - minX + 1;
-    const contentH = maxY - minY + 1;
-    const pad = Math.max(Math.round(Math.max(contentW, contentH) * 0.45), 30);
-    const cropX = Math.max(0, minX - pad);
-    const cropY = Math.max(0, minY - pad);
-    const cropW = Math.min(sw - cropX, contentW + pad * 2);
-    const cropH = Math.min(sh - cropY, contentH + pad * 2);
+    // Step 4: 轻度锐化（增强笔画边缘，不破坏形状）
+    _sharpen(imgData, targetW, targetH);
 
-    // 提取裁剪区域的二值数据
-    const cropPixels = new Uint8Array(cropW * cropH);
-    for (let y = 0; y < cropH; y++) {
-      for (let x = 0; x < cropW; x++) {
-        const srcX = cropX + x;
-        const srcY = cropY + y;
-        if (srcX >= 0 && srcX < sw && srcY >= 0 && srcY < sh) {
-          cropPixels[y * cropW + x] = pixels[srcY * sw + srcX];
-        } else {
-          cropPixels[y * cropW + x] = 255;
-        }
-      }
-    }
-
-    // Step 4: 形态学膨胀（加粗笔画）— 关键改进
-    const dilated = _dilate(cropPixels, cropW, cropH, 3);
-
-    // Step 5: 去除孤立噪点
-    const cleaned = _removeNoise(dilated, cropW, cropH);
-
-    // Step 6: 放大到Tesseract友好尺寸（高度300px）
-    return _scaleUp(cleaned, cropW, cropH);
+    scaledCtx.putImageData(imgData, 0, 0);
+    return scaledCanvas;
   }
 
   /**
-   * Otsu自适应阈值二值化
-   * 返回 Uint8Array，0=黑(笔画)，255=白(背景)
+   * 高对比度增强：将灰度值推向两极（黑或白）
+   * 笔画变黑，背景变白，中间灰色减少
    */
-  function _toBinary(imgData, w, h) {
+  function _enhanceContrast(imgData, w, h) {
     const d = imgData.data;
-    const hist = new Array(256).fill(0);
     for (let i = 0; i < d.length; i += 4) {
-      const gray = Math.round(d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114);
-      hist[gray]++;
+      // 先计算灰度
+      let gray = d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114;
+      // S曲线对比度增强
+      gray = gray / 255;
+      gray = 1 / (1 + Math.exp(-12 * (gray - 0.55)));  // sigmoid, 偏白
+      gray = Math.round(gray * 255);
+      // 硬阈值：进一步清理
+      gray = gray < 160 ? 0 : 255;
+      d[i] = d[i+1] = d[i+2] = gray;
     }
-    const total = w * h;
-    let sum = 0;
-    for (let i = 0; i < 256; i++) sum += i * hist[i];
-    let sumB = 0, wB = 0, maxVar = 0, threshold = 128;
-    for (let t = 0; t < 256; t++) {
-      wB += hist[t];
-      if (wB === 0) continue;
-      const wF = total - wB;
-      if (wF === 0) break;
-      sumB += t * hist[t];
-      const mB = sumB / wB;
-      const mF = (sum - sumB) / wF;
-      const between = wB * wF * (mB - mF) * (mB - mF);
-      if (between > maxVar) { maxVar = between; threshold = t; }
-    }
-    const result = new Uint8Array(total);
-    for (let i = 0; i < total; i++) {
-      const idx = i * 4;
-      const gray = d[idx] * 0.299 + d[idx+1] * 0.587 + d[idx+2] * 0.114;
-      result[i] = gray < threshold ? 0 : 255;
-    }
-    return result;
   }
 
   /**
-   * 形态学膨胀：将黑色像素扩展到周围N像素，加粗笔画
+   * 轻度锐化：3×3拉普拉斯核，增强笔画边缘
+   * 比膨胀温和得多，不会把"9"的圆环糊掉
    */
-  function _dilate(pixels, w, h, radius) {
-    const out = new Uint8Array(w * h).fill(255);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        if (pixels[y * w + x] === 0) {
-          // 将周围的像素都设为黑色
-          for (let dy = -radius; dy <= radius; dy++) {
-            for (let dx = -radius; dx <= radius; dx++) {
-              // 使用圆形核而非方形核
-              if (dx * dx + dy * dy <= radius * radius) {
-                const nx = x + dx, ny = y + dy;
-                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-                  out[ny * w + nx] = 0;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    return out;
-  }
+  function _sharpen(imgData, w, h) {
+    const src = new Uint8Array(imgData.data);
+    const dst = imgData.data;
+    const kernel = [0, -1, 0, -1, 5, -1, 0, -1, 0];
 
-  /**
-   * 去除孤立噪点：如果黑色像素的8邻域中黑色像素少于2个，则认为是噪点
-   */
-  function _removeNoise(pixels, w, h) {
-    const out = new Uint8Array(pixels);
     for (let y = 1; y < h - 1; y++) {
       for (let x = 1; x < w - 1; x++) {
-        if (pixels[y * w + x] === 0) {
-          let neighbors = 0;
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              if (dx === 0 && dy === 0) continue;
-              if (pixels[(y + dy) * w + (x + dx)] === 0) neighbors++;
-            }
+        let val = 0;
+        for (let ky = -1; ky <= 1; ky++) {
+          for (let kx = -1; kx <= 1; kx++) {
+            const idx = ((y + ky) * w + (x + kx)) * 4;
+            val += src[idx] * kernel[(ky + 1) * 3 + (kx + 1)];
           }
-          if (neighbors < 2) out[y * w + x] = 255; // 消除孤立点
         }
+        const idx = (y * w + x) * 4;
+        val = Math.max(0, Math.min(255, val));
+        dst[idx] = dst[idx+1] = dst[idx+2] = val;
       }
     }
-    return out;
-  }
-
-  /**
-   * 将二值像素数据放大到Tesseract友好尺寸
-   */
-  function _scaleUp(pixels, srcW, srcH) {
-    const targetH = 300; // 增大目标高度
-    const scale = targetH / srcH;
-    const outW = Math.max(Math.round(srcW * scale), 100);
-    const outH = targetH;
-
-    const outCanvas = document.createElement('canvas');
-    outCanvas.width = outW;
-    outCanvas.height = outH;
-    const ctx = outCanvas.getContext('2d');
-
-    // 先写入二值像素数据
-    const imgData = ctx.createImageData(outW, outH);
-    const d = imgData.data;
-    for (let y = 0; y < outH; y++) {
-      for (let x = 0; x < outW; x++) {
-        // 最近邻采样（保持锐利边缘）
-        const srcX = Math.min(Math.floor(x / scale), srcW - 1);
-        const srcY = Math.min(Math.floor(y / scale), srcH - 1);
-        const val = pixels[srcY * srcW + srcX];
-        const idx = (y * outW + x) * 4;
-        d[idx] = val; d[idx+1] = val; d[idx+2] = val; d[idx+3] = 255;
-      }
-    }
-    ctx.putImageData(imgData, 0, 0);
-    return outCanvas;
   }
 
   function _makeBlankOutput() {

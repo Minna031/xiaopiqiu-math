@@ -15,6 +15,7 @@ const CanvasManager = (() => {
   let boundDocMove = null;   // document级事件引用
   let boundDocUp = null;
   let useTouchFallback = false;  // iOS触摸兜底
+  let onStrokeEndCb = null;  // 笔画结束回调
   const MAX_UNDO = 50;
 
   function init(canvasEl) {
@@ -214,7 +215,13 @@ const CanvasManager = (() => {
       if (strokes.length > MAX_UNDO * 3) {
         strokes = strokes.slice(-MAX_UNDO * 3);
       }
+      const finishedStroke = currentStroke;
       currentStroke = null;
+      // 笔画结束回调，用于实时识别
+      if (onStrokeEndCb && finishedStroke.areaIndex >= 0) {
+        const areaIdx = finishedStroke.areaIndex;
+        setTimeout(() => onStrokeEndCb(areaIdx), 50);
+      }
     }
   }
 
@@ -296,6 +303,50 @@ const CanvasManager = (() => {
     return answerAreas;
   }
 
+  /**
+   * 获取指定区域的原始 canvas（用于实时识别）
+   */
+  function getAreaCanvas(areaIndex) {
+    const area = answerAreas.find(a => a.index === areaIndex);
+    if (!area) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const pad = 3;
+    const sx = Math.max(0, (area.x - pad) * dpr);
+    const sy = Math.max(0, (area.y - pad) * dpr);
+    const sw = (area.w + pad * 2) * dpr;
+    const sh = (area.h + pad * 2) * dpr;
+    const tmp = document.createElement('canvas');
+    tmp.width = Math.round(sw);
+    tmp.height = Math.round(sh);
+    const tCtx = tmp.getContext('2d');
+    tCtx.fillStyle = '#ffffff';
+    tCtx.fillRect(0, 0, tmp.width, tmp.height);
+    tCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, tmp.width, tmp.height);
+    return tmp;
+  }
+
+  /**
+   * 在指定区域绘制印刷体数字（替换手写笔迹）
+   */
+  function drawPrintedDigit(areaIndex, digit) {
+    const area = answerAreas.find(a => a.index === areaIndex);
+    if (!area || digit == null) return;
+    // 清除该区域的所有笔画
+    clearCurrentArea(areaIndex);
+    // 绘制印刷体数字
+    ctx.save();
+    ctx.fillStyle = '#1565C0';
+    ctx.font = `bold ${Math.round(area.h * 0.65)}px "Helvetica Neue", Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(digit), area.x + area.w / 2, area.y + area.h / 2);
+    ctx.restore();
+  }
+
+  function setOnStrokeEnd(callback) {
+    onStrokeEndCb = callback;
+  }
+
   function getAreaImage(areaIndex) {
     const area = answerAreas.find(a => a.index === areaIndex);
     if (!area) return null;
@@ -326,6 +377,7 @@ const CanvasManager = (() => {
     init, resize, undo, clearCurrentArea, clearAll,
     setEraserMode, getEraserMode,
     setAnswerAreas, getAnswerAreas,
+    getAreaCanvas, drawPrintedDigit, setOnStrokeEnd,
     getAreaImage, hasStrokesInArea,
     get canvas() { return canvas; }
   };
