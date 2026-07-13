@@ -814,6 +814,107 @@ html, body {
   color: white;
 }
 
+/* ---- 数字选择器（OCR修正） ---- */
+.digit-picker-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 2000;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+}
+.digit-picker-overlay.active {
+  display: flex;
+}
+.digit-picker {
+  background: #fff;
+  border-radius: 20px 20px 0 0;
+  padding: 20px 24px 32px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 -8px 30px rgba(0,0,0,0.2);
+}
+.digit-picker-label {
+  text-align: center;
+  font-weight: 600;
+  font-size: 1.1em;
+  margin-bottom: 16px;
+  color: var(--text);
+}
+.digit-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.digit-pick-btn {
+  height: 56px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--card-bg);
+  font-size: 1.5em;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--text);
+}
+.digit-pick-btn:active {
+  transform: scale(0.93);
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.digit-picker-actions {
+  display: flex;
+  gap: 12px;
+}
+.digit-pick-btn.pick-clear {
+  flex: 1;
+  font-size: 1em;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.digit-pick-btn.pick-skip {
+  flex: 1;
+  font-size: 1em;
+  color: var(--text-light);
+}
+
+/* OCR 确认页可点击的格子 */
+.ocr-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 48px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  font-size: 1.3em;
+  font-weight: 700;
+  margin: 0 2px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: var(--bg);
+}
+.ocr-cell:active {
+  background: rgba(74,144,217,0.15);
+}
+.ocr-cell.low-conf {
+  border-color: var(--warning);
+  background: #FFF8E1;
+}
+.ocr-cell.has-digit {
+  background: #EBF5FB;
+  border-color: var(--primary);
+}
+.ocr-cell-sep {
+  font-size: 1.3em;
+  font-weight: 700;
+  color: var(--text-light);
+  margin: 0 3px;
+}
+
 /* ---- 响应式 ---- */
 @media (max-width: 768px) {
   .report-overview {
