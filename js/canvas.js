@@ -342,15 +342,18 @@ const CanvasManager = (() => {
 
   /**
    * 在指定区域绘制印刷体数字（替换手写笔迹）
+   * 全局只保留一个印刷体数字，之前的印刷体恢复为手写笔迹
    */
   function drawPrintedDigit(areaIndex, digit) {
     const area = answerAreas.find(a => a.index === areaIndex);
     if (!area || digit == null) return;
-    // 先清除该区域的手写笔画和旧印刷体记录
+    // 清除之前的印刷体（旧印刷体区域将恢复为手写笔迹，因为 strokes 未被删除）
+    printedDigits = {};
+    // 清除当前区域的手写笔画（将被印刷体替代）
     strokes = strokes.filter(s => s.areaIndex !== areaIndex);
     // 记录新的印刷体数字
     printedDigits[areaIndex] = digit;
-    // 重绘整个画布（会自动渲染所有印刷体数字）
+    // 重绘整个画布（旧印刷体区域恢复手写，新区域显示印刷体）
     redraw();
   }
 
