@@ -16,6 +16,8 @@ const CanvasManager = (() => {
   let boundDocUp = null;
   let useTouchFallback = false;  // iOS触摸兜底
   let onStrokeEndCb = null;  // 笔画结束回调
+  let onRewriteStartCb = null; // 重写开始回调（用户开始书写已有印刷体的格子）
+  let printedDigits = {};      // 已识别的印刷体数字 { areaIndex: digit }
   const MAX_UNDO = 50;
 
   function init(canvasEl) {
@@ -110,6 +112,13 @@ const CanvasManager = (() => {
     // 检查是否在答题区内
     const areaIdx = isInAnswerArea(pos.x, pos.y);
     if (areaIdx === -1) return; // 不在答题区，不响应
+
+    // 如果该区域已有印刷体数字，清除它（用户要重写）
+    if (printedDigits[areaIdx] !== undefined) {
+      delete printedDigits[areaIdx];
+      if (onRewriteStartCb) onRewriteStartCb(areaIdx);
+      redraw();
+    }
 
     currentAreaIndex = areaIdx;
     isDrawing = true;
@@ -232,6 +241,10 @@ const CanvasManager = (() => {
     for (const stroke of strokes) {
       drawStroke(stroke);
     }
+    // 重绘所有已识别的印刷体数字
+    for (const [idxStr, digit] of Object.entries(printedDigits)) {
+      _renderPrintedDigit(parseInt(idxStr), digit);
+    }
   }
 
   function drawStroke(stroke) {
@@ -278,11 +291,13 @@ const CanvasManager = (() => {
 
   function clearCurrentArea(areaIndex) {
     strokes = strokes.filter(s => s.areaIndex !== areaIndex);
+    delete printedDigits[areaIndex];  // 清除该区域的印刷体记录
     redraw();
   }
 
   function clearAll() {
     strokes = [];
+    printedDigits = {};
     if (canvas) redraw();
   }
 
@@ -331,9 +346,20 @@ const CanvasManager = (() => {
   function drawPrintedDigit(areaIndex, digit) {
     const area = answerAreas.find(a => a.index === areaIndex);
     if (!area || digit == null) return;
-    // 清除该区域的所有笔画
-    clearCurrentArea(areaIndex);
-    // 绘制印刷体数字
+    // 先清除该区域的手写笔画和旧印刷体记录
+    strokes = strokes.filter(s => s.areaIndex !== areaIndex);
+    // 记录新的印刷体数字
+    printedDigits[areaIndex] = digit;
+    // 重绘整个画布（会自动渲染所有印刷体数字）
+    redraw();
+  }
+
+  /**
+   * 实际渲染印刷体数字到 canvas（由 redraw 调用）
+   */
+  function _renderPrintedDigit(areaIndex, digit) {
+    const area = answerAreas.find(a => a.index === areaIndex);
+    if (!area || digit == null) return;
     ctx.save();
     ctx.fillStyle = '#1565C0';
     ctx.font = `bold ${Math.round(area.h * 0.65)}px "Helvetica Neue", Arial, sans-serif`;
@@ -345,6 +371,10 @@ const CanvasManager = (() => {
 
   function setOnStrokeEnd(callback) {
     onStrokeEndCb = callback;
+  }
+
+  function setOnRewriteStart(callback) {
+    onRewriteStartCb = callback;
   }
 
   function getAreaImage(areaIndex) {
@@ -377,7 +407,7 @@ const CanvasManager = (() => {
     init, resize, undo, clearCurrentArea, clearAll,
     setEraserMode, getEraserMode,
     setAnswerAreas, getAnswerAreas,
-    getAreaCanvas, drawPrintedDigit, setOnStrokeEnd,
+    getAreaCanvas, drawPrintedDigit, setOnStrokeEnd, setOnRewriteStart,
     getAreaImage, hasStrokesInArea,
     get canvas() { return canvas; }
   };

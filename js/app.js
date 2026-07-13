@@ -79,6 +79,8 @@ const App = (() => {
         areas.forEach(a => {
           if (a.questionIndex === currentQuestionIndex) {
             CanvasManager.clearCurrentArea(a.index);
+            studentCellDigits[currentQuestionIndex][a.cellIndex] = '';
+            _highlightCell(currentQuestionIndex, a.cellIndex, '');
           }
         });
       }
@@ -177,6 +179,7 @@ const App = (() => {
 
       // 注册实时识别回调
       CanvasManager.setOnStrokeEnd(onCellStrokeEnd);
+      CanvasManager.setOnRewriteStart(onCellRewriteStart);
 
       // 启动计时器
       Timer.start(settings.timeLimit,
@@ -309,6 +312,19 @@ const App = (() => {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     currentQuestionIndex = index;
+  }
+
+  /**
+   * 重写开始：用户开始书写已有印刷体数字的格子，清除该格子的识别结果
+   */
+  function onCellRewriteStart(areaIndex) {
+    const areas = CanvasManager.getAnswerAreas();
+    const area = areas.find(a => a.index === areaIndex);
+    if (!area) return;
+    // 清除识别结果
+    studentCellDigits[area.questionIndex][area.cellIndex] = '';
+    // 清除格子高亮样式
+    _highlightCell(area.questionIndex, area.cellIndex, '');
   }
 
   /**
