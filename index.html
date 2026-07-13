@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>小皮球口算练习</title>
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=2">
   <!-- Tesseract.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -115,17 +115,40 @@
     <div id="parent-content" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;"></div>
   </div>
 
+  <!-- ====== 数字选择器（OCR修正用） ====== -->
+  <div class="digit-picker-overlay" id="digit-picker">
+    <div class="digit-picker">
+      <div class="digit-picker-label" id="picker-label">选择数字</div>
+      <div class="digit-picker-grid">
+        <button class="digit-pick-btn" data-digit="0">0</button>
+        <button class="digit-pick-btn" data-digit="1">1</button>
+        <button class="digit-pick-btn" data-digit="2">2</button>
+        <button class="digit-pick-btn" data-digit="3">3</button>
+        <button class="digit-pick-btn" data-digit="4">4</button>
+        <button class="digit-pick-btn" data-digit="5">5</button>
+        <button class="digit-pick-btn" data-digit="6">6</button>
+        <button class="digit-pick-btn" data-digit="7">7</button>
+        <button class="digit-pick-btn" data-digit="8">8</button>
+        <button class="digit-pick-btn" data-digit="9">9</button>
+      </div>
+      <div class="digit-picker-actions">
+        <button class="digit-pick-btn pick-clear" data-digit="">清空</button>
+        <button class="digit-pick-btn pick-skip" id="picker-skip">跳过</button>
+      </div>
+    </div>
+  </div>
+
   <!-- JS模块加载顺序很重要 -->
-  <script src="js/storage.js"></script>
-  <script src="js/questions.js"></script>
-  <script src="js/timer.js"></script>
-  <script src="js/canvas.js"></script>
-  <script src="js/answer-detect.js"></script>
-  <script src="js/ocr.js"></script>
-  <script src="js/grading.js"></script>
-  <script src="js/error-book.js"></script>
-  <script src="js/parent.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/storage.js?v=2"></script>
+  <script src="js/questions.js?v=2"></script>
+  <script src="js/timer.js?v=2"></script>
+  <script src="js/canvas.js?v=2"></script>
+  <script src="js/answer-detect.js?v=2"></script>
+  <script src="js/ocr.js?v=2"></script>
+  <script src="js/grading.js?v=2"></script>
+  <script src="js/error-book.js?v=2"></script>
+  <script src="js/parent.js?v=2"></script>
+  <script src="js/app.js?v=2"></script>
 
   <script>
     // 首页信息显示
