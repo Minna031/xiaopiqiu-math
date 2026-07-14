@@ -18,6 +18,8 @@ const CanvasManager = (() => {
   let onStrokeEndCb = null;  // 笔画结束回调
   let onRewriteStartCb = null; // 重写开始回调（用户开始书写已有印刷体的格子）
   let printedDigits = {};      // 已识别的印刷体数字 { areaIndex: digit }
+  let strokeEndTimers = {};    // 每区域的延迟识别计时器 { areaIndex: timerId }
+  const STROKE_END_DELAY = 1500; // 停笔后等待1.5秒再识别（等待多笔画完成）
   const MAX_UNDO = 50;
 
   function init(canvasEl) {
@@ -226,10 +228,18 @@ const CanvasManager = (() => {
       }
       const finishedStroke = currentStroke;
       currentStroke = null;
-      // 笔画结束回调，用于实时识别
+      // 笔画结束回调：延迟识别，等待用户完成多笔画数字
       if (onStrokeEndCb && finishedStroke.areaIndex >= 0) {
         const areaIdx = finishedStroke.areaIndex;
-        setTimeout(() => onStrokeEndCb(areaIdx), 50);
+        // 清除该区域之前的计时器（用户还在写）
+        if (strokeEndTimers[areaIdx]) {
+          clearTimeout(strokeEndTimers[areaIdx]);
+        }
+        // 重新计时，停笔 1.5 秒后才触发识别
+        strokeEndTimers[areaIdx] = setTimeout(() => {
+          delete strokeEndTimers[areaIdx];
+          onStrokeEndCb(areaIdx);
+        }, STROKE_END_DELAY);
       }
     }
   }
