@@ -13,6 +13,7 @@ const App = (() => {
   let pickerQIdx = -1;
   let pickerCellIdx = -1;
   let _pendingRecognition = {};  // 临时存储识别结果，用于统计
+  let _cellOriginalImages = {};  // 存储格子原始手写图像，用于修正训练
 
   // DOM引用
   const $ = id => document.getElementById(id);
@@ -421,6 +422,7 @@ const App = (() => {
     const canvasEl = CanvasManager.canvas;
     ocrConfidences = new Array(currentQuestions.length).fill(0);
     studentAnswers = new Array(currentQuestions.length).fill('');
+    _cellOriginalImages = {};  // 清空旧的原始图像缓存
     // studentCellDigits 已在 beginPracticeSession 中初始化，实时识别已填充部分格子
 
     // 逐题逐格识别
@@ -431,6 +433,17 @@ const App = (() => {
       let cellCount = 0;
 
       for (const cell of qCells) {
+        // 存储原始手写/图像（用于后续修正训练）
+        if (AnswerDetect.hasInkInArea(canvasEl, cell)) {
+          const cropped = AnswerDetect.cropArea(canvasEl, cell);
+          // 复制到新 canvas 以防被后续操作覆盖
+          const snap = document.createElement('canvas');
+          snap.width = cropped.width;
+          snap.height = cropped.height;
+          snap.getContext('2d').drawImage(cropped, 0, 0);
+          _cellOriginalImages[q + '_' + cell.cellIndex] = snap;
+        }
+
         // 如果实时识别已填充该格子，跳过 OCR
         if (studentCellDigits[q][cell.cellIndex] !== '') {
           totalConf += 80; // 实时识别的置信度设为80
@@ -562,6 +575,21 @@ const App = (() => {
       btn.addEventListener('click', () => {
         if (pickerQIdx < 0) return;
         const digit = btn.dataset.digit;
+        const prevDigit = studentCellDigits[pickerQIdx][pickerCellIdx];
+
+        // 如果修正了识别错误的数字，将原始手写作为训练素材
+        if (prevDigit !== digit && prevDigit !== '') {
+          const imgKey = pickerQIdx + '_' + pickerCellIdx;
+          const origCanvas = _cellOriginalImages[imgKey];
+          if (origCanvas && typeof DigitRecognizer !== 'undefined' && DigitRecognizer.addCalibrationSample) {
+            const added = DigitRecognizer.addCalibrationSample(origCanvas, parseInt(digit));
+            if (added) {
+              console.log(`[训练] 手动修正: "${prevDigit}" → "${digit}"，已加入校准样本`);
+              DigitRecognizer.finishCalibration(); // 自动保存
+            }
+          }
+        }
+
         studentCellDigits[pickerQIdx][pickerCellIdx] = digit;
         studentAnswers[pickerQIdx] = _assembleAnswer(
           studentCellDigits[pickerQIdx], currentQuestions[pickerQIdx].answerType
