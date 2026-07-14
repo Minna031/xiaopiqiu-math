@@ -405,10 +405,10 @@ const DigitRecognizer = (() => {
   // ===== KNN 校准预测 =====
   function _predictKNN(input) {
     if (calibrationSamples.length === 0) return null;
-
-    const K = Math.min(5, calibrationSamples.length);
+  
+    const K = Math.min(7, calibrationSamples.length);
     const distances = [];
-
+  
     for (let i = 0; i < calibrationSamples.length; i++) {
       const s = calibrationSamples[i];
       let dist = 0;
@@ -418,56 +418,86 @@ const DigitRecognizer = (() => {
       }
       distances.push({ dist: Math.sqrt(dist), label: s.label });
     }
-
+  
     distances.sort((a, b) => a.dist - b.dist);
-
+  
     // 距离加权投票
     const votes = new Array(10).fill(0);
     for (let k = 0; k < K; k++) {
       const w = 1 / (distances[k].dist + 0.01);
       votes[distances[k].label] += w;
     }
-
+  
     let maxIdx = 0;
+    let secondIdx = 0;
     let totalVotes = 0;
     for (let i = 0; i < 10; i++) {
       totalVotes += votes[i];
-      if (votes[i] > votes[maxIdx]) maxIdx = i;
+      if (votes[i] > votes[maxIdx]) { secondIdx = maxIdx; maxIdx = i; }
+      else if (votes[i] > votes[secondIdx] && i !== maxIdx) secondIdx = i;
     }
-
-    const confidence = totalVotes > 0 ? Math.round((votes[maxIdx] / totalVotes) * 100) : 0;
+  
+    const rawConf = totalVotes > 0 ? (votes[maxIdx] / totalVotes) : 0;
+    // 区分度：第一名投票占比越大越可信
+    const margin = totalVotes > 0 ? (votes[maxIdx] - votes[secondIdx]) / totalVotes : 0;
+    // 置信度 = 基础分 + 区分度加权，不加固定补贴
+    const confidence = Math.min(99, Math.round((rawConf * 60 + margin * 40) * 100 / 100));
+  
     return {
       digit: String(maxIdx),
-      confidence: Math.min(99, confidence + 30), // KNN 校准结果置信度较高
+      confidence,
+      rawConf: Math.round(rawConf * 100),
       scores: votes.map(v => totalVotes > 0 ? v / totalVotes : 0),
     };
   }
-
-  // ===== 预测（校准优先，MNIST 兜底）=====
+  
+  // ===== 预测（校准 + MNIST 融合决策）=====
   function predict(canvasEl) {
     const input = _preprocess(canvasEl);
     if (!input) return { digit: null, confidence: 0, scores: null };
-
-    // 优先：校准 KNN
+  
+    let knnResult = null;
+    let mnistResult = null;
+  
+    // KNN 校准预测
     if (calibrated && calibrationSamples.length > 0) {
-      const knnResult = _predictKNN(input);
-      if (knnResult && knnResult.confidence >= 40) {
+      knnResult = _predictKNN(input);
+    }
+  
+    // MNIST 神经网络预测
+    if (ready) {
+      const { o } = _forward(input);
+      let maxIdx = 0;
+      for (let i = 1; i < OUTPUT; i++) if (o[i] > o[maxIdx]) maxIdx = i;
+      mnistResult = {
+        digit: String(maxIdx),
+        confidence: Math.round(o[maxIdx] * 100),
+        scores: Array.from(o),
+      };
+    }
+  
+    // 融合决策
+    if (knnResult && mnistResult) {
+      if (knnResult.digit === mnistResult.digit) {
+        // 双引擎一致：提升置信度
+        const fused = Math.min(99, Math.round((knnResult.confidence + mnistResult.confidence) / 2 + 10));
+        return { digit: knnResult.digit, confidence: fused, scores: knnResult.scores, engine: 'knn+mnist' };
+      }
+      // 双引擎不一致：取置信度更高的
+      if (knnResult.confidence >= mnistResult.confidence + 10) {
         return { ...knnResult, engine: 'calibration' };
       }
+      if (mnistResult.confidence >= knnResult.confidence + 10) {
+        return { ...mnistResult, engine: 'mnist' };
+      }
+      // 很接近但不一致：降低置信度，保留手写
+      const lower = knnResult.confidence > mnistResult.confidence ? knnResult : mnistResult;
+      return { ...lower, confidence: Math.round(lower.confidence * 0.7), engine: lower === knnResult ? 'calibration' : 'mnist' };
     }
-
-    // 兜底：MNIST 神经网络
-    if (!ready) return { digit: null, confidence: 0, scores: null };
-    const { o } = _forward(input);
-    let maxIdx = 0;
-    for (let i = 1; i < OUTPUT; i++) if (o[i] > o[maxIdx]) maxIdx = i;
-
-    return {
-      digit: String(maxIdx),
-      confidence: Math.round(o[maxIdx] * 100),
-      scores: Array.from(o),
-      engine: 'mnist',
-    };
+  
+    if (knnResult) return { ...knnResult, engine: 'calibration' };
+    if (mnistResult) return { ...mnistResult, engine: 'mnist' };
+    return { digit: null, confidence: 0, scores: null };
   }
 
   // ===== 校准样本管理 =====
