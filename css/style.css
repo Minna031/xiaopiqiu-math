@@ -268,21 +268,23 @@ html, body {
   -webkit-overflow-scrolling: touch;
 }
 #questions-container {
-  padding: 16px 20px;
+  padding: 12px 12px;
   position: relative;
   z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
 }
 .question-item {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  margin-bottom: 4px;
+  padding: 6px 8px;
   border-radius: 10px;
   background: var(--card-bg);
   box-shadow: var(--shadow);
   transition: all 0.3s;
-  font-size: 1.15em;
-  min-height: 60px;
+  font-size: 1.05em;
+  min-height: 56px;
 }
 .question-item.active {
   background: #EBF5FB;
@@ -292,7 +294,8 @@ html, body {
 .question-number {
   font-weight: 700;
   color: var(--primary);
-  min-width: 36px;
+  min-width: 28px;
+  font-size: 0.95em;
 }
 .question-text {
   flex: 1;
@@ -305,29 +308,27 @@ html, body {
   flex-shrink: 0;
 }
 .digit-cell {
-  width: 70px;
-  height: 76px;
+  width: 48px;
+  height: 54px;
   border: 2px solid var(--border);
-  border-radius: 6px;
+  border-radius: 5px;
   background: rgba(255,255,255,0.6);
   position: relative;
   flex-shrink: 0;
 }
 .digit-cell::before {
-  /* 基线引导线 */
   content: '';
   position: absolute;
-  left: 4px;
-  right: 4px;
-  bottom: 10px;
+  left: 3px;
+  right: 3px;
+  bottom: 7px;
   border-bottom: 1.5px dashed #c8d6e5;
 }
 .digit-cell::after {
-  /* 中线引导线 */
   content: '';
   position: absolute;
-  left: 4px;
-  right: 4px;
+  left: 3px;
+  right: 3px;
   top: 38%;
   border-bottom: 1px dotted #dfe6ed;
 }
@@ -931,7 +932,9 @@ html, body {
     grid-template-columns: repeat(2, 1fr);
   }
   .home-title { font-size: 1.8em; }
-  .digit-cell { width: 56px; height: 62px; }
+  .digit-cell { width: 42px; height: 48px; }
+  .question-item { font-size: 0.95em; padding: 5px 6px; min-height: 50px; }
+  #questions-container { gap: 4px 6px; }
 }
 
 /* ---- 校准页面 ---- */
