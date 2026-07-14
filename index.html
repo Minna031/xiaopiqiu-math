@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>小皮球口算练习</title>
-  <link rel="stylesheet" href="css/style.css?v=5">
+  <link rel="stylesheet" href="css/style.css?v=6">
   <!-- Tesseract.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -38,6 +38,7 @@
       <button class="btn-start" id="btn-start">开始练习</button>
       <div id="ai-status" style="text-align:center;font-size:0.8em;color:var(--text-light);margin-top:8px;"></div>
       <div class="home-bottom-btns">
+        <button id="btn-calibrate">✍️ 校准训练</button>
         <button id="btn-error-book">错题本 (<span id="home-error-count">0</span>)</button>
         <button id="btn-parent">家长模式</button>
       </div>
@@ -110,10 +111,46 @@
       <div class="parent-tabs">
         <button id="btn-parent-tab-settings" class="active">练习设置</button>
         <button id="btn-parent-tab-report">学习报告</button>
+        <button id="btn-parent-tab-recognition">识别报告</button>
       </div>
       <button id="btn-parent-logout" style="border:none;background:none;color:var(--text-light);cursor:pointer;">退出</button>
     </div>
     <div id="parent-content" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;"></div>
+  </div>
+
+  <!-- ====== 校准页面 ====== -->
+  <div class="page" id="page-calibration">
+    <div class="cal-header">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <h3 style="font-size:1.1em;">✍️ 手写校准训练</h3>
+        <span id="cal-progress-text" style="font-size:0.9em;color:var(--text-light);">0/50</span>
+      </div>
+      <div class="cal-progress-bar">
+        <div class="cal-progress-fill" id="cal-progress-bar"></div>
+      </div>
+    </div>
+    <div class="cal-body">
+      <div class="cal-main">
+        <div class="cal-target">
+          <div class="cal-target-digit" id="cal-target-digit">0</div>
+          <div class="cal-target-label">写这个数字</div>
+        </div>
+        <div class="cal-write-area" id="cal-write-area">
+          <canvas id="cal-canvas"></canvas>
+        </div>
+      </div>
+      <div class="cal-info">
+        <div class="cal-instruction" id="cal-instruction">请在右侧书写区域写 5 遍 "0"</div>
+        <div class="cal-sample-dots" id="cal-sample-dots"></div>
+        <div class="cal-feedback" id="cal-feedback"></div>
+      </div>
+      <div class="cal-message" id="cal-message"></div>
+    </div>
+    <div class="cal-actions">
+      <button class="cal-btn" id="cal-clear-btn">清除</button>
+      <button class="cal-btn" id="cal-skip-btn">跳过</button>
+      <button class="cal-btn primary" id="cal-done-btn" style="display:none;">完成</button>
+    </div>
   </div>
 
   <!-- ====== 数字选择器（OCR修正用） ====== -->
@@ -140,17 +177,18 @@
   </div>
 
   <!-- JS模块加载顺序很重要 -->
-  <script src="js/storage.js?v=5"></script>
-  <script src="js/questions.js?v=5"></script>
-  <script src="js/timer.js?v=5"></script>
-  <script src="js/canvas.js?v=5"></script>
-  <script src="js/answer-detect.js?v=5"></script>
-  <script src="js/digit-recognizer.js?v=5"></script>
-  <script src="js/ocr.js?v=5"></script>
-  <script src="js/grading.js?v=5"></script>
-  <script src="js/error-book.js?v=5"></script>
-  <script src="js/parent.js?v=5"></script>
-  <script src="js/app.js?v=5"></script>
+  <script src="js/storage.js?v=6"></script>
+  <script src="js/questions.js?v=6"></script>
+  <script src="js/timer.js?v=6"></script>
+  <script src="js/canvas.js?v=6"></script>
+  <script src="js/answer-detect.js?v=6"></script>
+  <script src="js/digit-recognizer.js?v=6"></script>
+  <script src="js/ocr.js?v=6"></script>
+  <script src="js/grading.js?v=6"></script>
+  <script src="js/error-book.js?v=6"></script>
+  <script src="js/parent.js?v=6"></script>
+  <script src="js/calibration.js?v=6"></script>
+  <script src="js/app.js?v=6"></script>
 
   <script>
     // 首页信息显示
