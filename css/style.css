@@ -933,3 +933,196 @@ html, body {
   .home-title { font-size: 1.8em; }
   .digit-cell { width: 56px; height: 62px; }
 }
+
+/* ---- 校准页面 ---- */
+.cal-header {
+  padding: 12px 16px;
+  background: var(--card-bg);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  flex-shrink: 0;
+}
+.cal-progress-bar {
+  height: 6px;
+  background: #e0e0e0;
+  border-radius: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.cal-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--success));
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+.cal-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  gap: 16px;
+  overflow: hidden;
+}
+.cal-main {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  width: 100%;
+  max-width: 500px;
+}
+.cal-target {
+  flex-shrink: 0;
+  text-align: center;
+}
+.cal-target-digit {
+  font-size: 5em;
+  font-weight: 800;
+  color: var(--primary);
+  line-height: 1;
+  text-shadow: 2px 2px 0 rgba(74,144,217,0.1);
+}
+.cal-target-label {
+  font-size: 0.85em;
+  color: var(--text-light);
+  margin-top: 4px;
+}
+.cal-write-area {
+  flex: 1;
+  aspect-ratio: 1;
+  max-height: 260px;
+  border: 3px dashed var(--primary);
+  border-radius: 16px;
+  background: rgba(74,144,217,0.03);
+  position: relative;
+  touch-action: none;
+}
+.cal-write-area canvas {
+  width: 100%;
+  height: 100%;
+  border-radius: 13px;
+}
+.cal-info {
+  text-align: center;
+  width: 100%;
+}
+.cal-instruction {
+  font-size: 1em;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.cal-sample-dots {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+.cal-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: transparent;
+  transition: all 0.3s;
+}
+.cal-dot.filled {
+  background: var(--success);
+  border-color: var(--success);
+}
+.cal-feedback {
+  font-size: 0.9em;
+  min-height: 1.4em;
+  color: var(--text-light);
+}
+.cal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  padding: 12px;
+  flex-shrink: 0;
+}
+.cal-btn {
+  padding: 10px 24px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 1em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.cal-btn:active {
+  background: #f0f0f0;
+  transform: scale(0.97);
+}
+.cal-btn.primary {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.cal-message {
+  text-align: center;
+  font-size: 1.1em;
+  padding: 16px;
+  color: var(--text);
+}
+
+/* ---- 识别报告 ---- */
+.digit-stats-table {
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+}
+.digit-stats-header {
+  display: grid;
+  grid-template-columns: 50px 1fr 1fr 80px;
+  padding: 8px 12px;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--text-light);
+  border-bottom: 2px solid var(--border);
+}
+.digit-stats-row {
+  display: grid;
+  grid-template-columns: 50px 1fr 1fr 80px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  align-items: center;
+  font-size: 0.9em;
+}
+.digit-stats-row.weak {
+  background: rgba(231,76,60,0.05);
+}
+.digit-label {
+  font-weight: 700;
+  font-size: 1.1em;
+  color: var(--primary);
+}
+.digit-acc.good { color: var(--success); font-weight: 600; }
+.digit-acc.mid { color: var(--warning); font-weight: 600; }
+.digit-acc.bad { color: var(--danger); font-weight: 600; }
+.weak-digits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.weak-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(231,76,60,0.08);
+  border-radius: var(--radius);
+  border: 1px solid rgba(231,76,60,0.2);
+}
+.weak-digit {
+  font-size: 1.5em;
+  font-weight: 800;
+  color: var(--danger);
+}
+.weak-info {
+  font-size: 0.85em;
+  color: var(--text-light);
+}
