@@ -406,12 +406,33 @@ const CanvasManager = (() => {
     return strokes.some(s => s.areaIndex === areaIndex);
   }
 
+  /**
+   * 获取指定区域的笔画坐标数据（用于校准采集）
+   * 返回格式: [{ points: [{x,y,pressure}], ... }, ...]
+   */
+  function getStrokesInArea(areaIndex) {
+    return strokes
+      .filter(s => s.areaIndex === areaIndex && !s.isEraser)
+      .map(s => ({
+        points: s.points.map(p => ({ x: p.x, y: p.y, pressure: p.pressure })),
+      }));
+  }
+
+  /**
+   * 获取指定区域的边界框（笔画坐标范围）
+   */
+  function getAreaBounds(areaIndex) {
+    const area = answerAreas.find(a => a.index === areaIndex);
+    if (!area) return null;
+    return { x: area.x, y: area.y, w: area.w, h: area.h };
+  }
+
   return {
     init, resize, undo, clearCurrentArea, clearAll,
     setEraserMode, getEraserMode,
     setAnswerAreas, getAnswerAreas,
     getAreaCanvas, drawPrintedDigit, setOnStrokeEnd, setOnRewriteStart,
-    getAreaImage, hasStrokesInArea,
+    getAreaImage, hasStrokesInArea, getStrokesInArea, getAreaBounds,
     get canvas() { return canvas; }
   };
 })();

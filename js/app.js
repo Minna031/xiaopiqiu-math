@@ -12,6 +12,7 @@ const App = (() => {
   let isErrorBookPractice = false;
   let pickerQIdx = -1;
   let pickerCellIdx = -1;
+  let _pendingRecognition = {};  // 临时存储识别结果，用于统计
 
   // DOM引用
   const $ = id => document.getElementById(id);
@@ -30,9 +31,21 @@ const App = (() => {
   function updateAIStatus() {
     const el = $('ai-status');
     if (!el) return;
+    const calStatus = DigitRecognizer.isCalibrated() ? '🎯' : '✍️';
     const s = DigitRecognizer.getStatus();
     if (s === 'ready') {
-      el.innerHTML = '✅ AI 手写识别引擎已就绪';
+      const cal = DigitRecognizer.isCalibrated();
+      const sampleCount = DigitRecognizer.getCalibrationSampleCount();
+      if (cal) {
+        el.innerHTML = `${calStatus} AI 已就绪 · 已校准(${sampleCount}个样本)`;
+      } else {
+        el.innerHTML = '✅ AI 已就绪 · <a href="#" id="link-calibrate" style="color:#4A90D9;">建议校准</a>';
+        // 动态绑定校准链接
+        setTimeout(() => {
+          const link = $('link-calibrate');
+          if (link) link.onclick = (e) => { e.preventDefault(); Calibration.start(); };
+        }, 100);
+      }
       el.style.color = '#4CAF50';
     } else if (s === 'loading') {
       el.innerHTML = '⏳ AI 模型加载中...';
@@ -52,6 +65,9 @@ const App = (() => {
     // 顶部按钮
     $('btn-error-book').addEventListener('click', () => showPage('error-book'));
     $('btn-parent').addEventListener('click', () => showPage('parent-login'));
+    // 校准训练按钮
+    const calBtn = $('btn-calibrate');
+    if (calBtn) calBtn.addEventListener('click', () => Calibration.start());
     $('btn-home').addEventListener('click', () => {
       if (isPracticing) {
         if (!confirm('练习进行中，确定退出吗？')) return;
@@ -111,6 +127,7 @@ const App = (() => {
     });
     $('btn-parent-tab-settings').addEventListener('click', () => showParentTab('settings'));
     $('btn-parent-tab-report').addEventListener('click', () => showParentTab('report'));
+    $('btn-parent-tab-recognition').addEventListener('click', () => showParentTab('recognition'));
   }
 
   // ---- 界面切换 ----
@@ -351,12 +368,23 @@ const App = (() => {
 
     const result = DigitRecognizer.predict(cellCanvas);
 
-    if (result.digit !== null && result.confidence >= 70) {
+    // 记录识别统计（用于家长面板）
+    if (result.digit !== null) {
+      // 暂存预测结果，提交批改后可对比正确答案
+      const engine = result.engine || (DigitRecognizer.isCalibrated() ? 'calibration' : 'mnist');
+      _pendingRecognition[qIdx + '_' + cIdx] = {
+        predicted: result.digit,
+        confidence: result.confidence,
+        engine: engine,
+      };
+    }
+
+    if (result.digit !== null && result.confidence >= 50) {
       // 高置信度：存储数字并显示印刷体
       studentCellDigits[qIdx][cIdx] = result.digit;
       CanvasManager.drawPrintedDigit(areaIndex, result.digit);
       _highlightCell(qIdx, cIdx, 'recognized');
-    } else if (result.digit !== null && result.confidence >= 40) {
+    } else if (result.digit !== null && result.confidence >= 30) {
       // 低置信度：存储数字但保留手写
       studentCellDigits[qIdx][cIdx] = result.digit;
       _highlightCell(qIdx, cIdx, 'uncertain');
@@ -628,6 +656,9 @@ const App = (() => {
     const gradeResult = Grading.gradeAll(currentQuestions, studentAnswers);
     ErrorBook.recordErrors(gradeResult.results);
 
+    // 记录识别统计
+    _recordRecognitionStats(gradeResult);
+
     Storage.addHistory({
       grade: Storage.getSettings().grade,
       difficulty: Storage.getSettings().difficulty,
@@ -640,6 +671,32 @@ const App = (() => {
     showResults(gradeResult);
     $('btn-submit').disabled = false;
     $('btn-submit').textContent = '提交';
+  }
+
+  /**
+   * 记录识别统计：将每格的预测结果与正确答案对比
+   */
+  function _recordRecognitionStats(gradeResult) {
+    for (let q = 0; q < currentQuestions.length; q++) {
+      const result = gradeResult.results[q];
+      const correctAnswer = String(result.correctAnswer);
+      const studentDigits = studentCellDigits[q];
+
+      for (let c = 0; c < studentDigits.length; c++) {
+        const key = q + '_' + c;
+        const pending = _pendingRecognition[key];
+        if (!pending) continue;
+        // 获取正确答案中对应位置的数字
+        const correctDigit = correctAnswer.replace(/[^0-9]/g, '')[c] || '';
+        if (correctDigit && pending.predicted) {
+          Storage.addRecognitionResult(
+            correctDigit, pending.predicted,
+            pending.confidence, pending.engine
+          );
+        }
+      }
+    }
+    _pendingRecognition = {};
   }
 
   function showResults(gradeResult) {
@@ -703,10 +760,13 @@ const App = (() => {
   function showParentTab(tab) {
     $('btn-parent-tab-settings').classList.toggle('active', tab === 'settings');
     $('btn-parent-tab-report').classList.toggle('active', tab === 'report');
+    $('btn-parent-tab-recognition').classList.toggle('active', tab === 'recognition');
     if (tab === 'settings') {
       Parent.renderSettings($('parent-content'));
-    } else {
+    } else if (tab === 'report') {
       Parent.renderReport($('parent-content'));
+    } else if (tab === 'recognition') {
+      Parent.renderRecognition($('parent-content'));
     }
   }
 

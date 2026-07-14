@@ -17,6 +17,10 @@ const DigitRecognizer = (() => {
   let ready = false;
   let status = 'idle'; // idle | loading | training | ready | failed
 
+  // ===== 校准数据 (KNN) =====
+  let calibrationSamples = [];  // [{data: Float32Array(784), label: 0-9}]
+  let calibrated = false;
+
   // ===== 权重初始化 (Kaiming He) =====
   function _initWeights() {
     const s1 = Math.sqrt(2 / INPUT);
@@ -398,12 +402,62 @@ const DigitRecognizer = (() => {
     return result;
   }
 
-  // ===== 预测 =====
+  // ===== KNN 校准预测 =====
+  function _predictKNN(input) {
+    if (calibrationSamples.length === 0) return null;
+
+    const K = Math.min(5, calibrationSamples.length);
+    const distances = [];
+
+    for (let i = 0; i < calibrationSamples.length; i++) {
+      const s = calibrationSamples[i];
+      let dist = 0;
+      for (let j = 0; j < 784; j++) {
+        const diff = input[j] - s.data[j];
+        dist += diff * diff;
+      }
+      distances.push({ dist: Math.sqrt(dist), label: s.label });
+    }
+
+    distances.sort((a, b) => a.dist - b.dist);
+
+    // 距离加权投票
+    const votes = new Array(10).fill(0);
+    for (let k = 0; k < K; k++) {
+      const w = 1 / (distances[k].dist + 0.01);
+      votes[distances[k].label] += w;
+    }
+
+    let maxIdx = 0;
+    let totalVotes = 0;
+    for (let i = 0; i < 10; i++) {
+      totalVotes += votes[i];
+      if (votes[i] > votes[maxIdx]) maxIdx = i;
+    }
+
+    const confidence = totalVotes > 0 ? Math.round((votes[maxIdx] / totalVotes) * 100) : 0;
+    return {
+      digit: String(maxIdx),
+      confidence: Math.min(99, confidence + 30), // KNN 校准结果置信度较高
+      scores: votes.map(v => totalVotes > 0 ? v / totalVotes : 0),
+    };
+  }
+
+  // ===== 预测（校准优先，MNIST 兜底）=====
   function predict(canvasEl) {
-    if (!ready) return { digit: null, confidence: 0, scores: null };
     const input = _preprocess(canvasEl);
     if (!input) return { digit: null, confidence: 0, scores: null };
 
+    // 优先：校准 KNN
+    if (calibrated && calibrationSamples.length > 0) {
+      const knnResult = _predictKNN(input);
+      if (knnResult && knnResult.confidence >= 40) {
+        return { ...knnResult, engine: 'calibration' };
+      }
+    }
+
+    // 兜底：MNIST 神经网络
+    if (!ready) return { digit: null, confidence: 0, scores: null };
     const { o } = _forward(input);
     let maxIdx = 0;
     for (let i = 1; i < OUTPUT; i++) if (o[i] > o[maxIdx]) maxIdx = i;
@@ -412,8 +466,73 @@ const DigitRecognizer = (() => {
       digit: String(maxIdx),
       confidence: Math.round(o[maxIdx] * 100),
       scores: Array.from(o),
+      engine: 'mnist',
     };
   }
+
+  // ===== 校准样本管理 =====
+  function addCalibrationSample(canvasEl, label) {
+    const input = _preprocess(canvasEl);
+    if (!input) return false;
+    calibrationSamples.push({ data: new Float32Array(input), label });
+    return true;
+  }
+
+  function finishCalibration() {
+    if (calibrationSamples.length < 10) return false;
+    calibrated = true;
+    // 保存到 localStorage
+    try {
+      const serializable = calibrationSamples.map(s => ({
+        data: Array.from(s.data),
+        label: s.label,
+      }));
+      localStorage.setItem('kousuan_cal_samples', JSON.stringify(serializable));
+      // 同时记录到 Storage 模块（元数据）
+      const counts = new Array(10).fill(0);
+      calibrationSamples.forEach(s => counts[s.label]++);
+      if (typeof Storage !== 'undefined') {
+        Storage.saveCalibration({
+          sampleCount: calibrationSamples.length,
+          digitCounts: counts,
+          date: new Date().toISOString(),
+        });
+      }
+      console.log(`[DigitNN] Calibration saved: ${calibrationSamples.length} samples`);
+    } catch (e) {
+      console.warn('[DigitNN] Failed to save calibration:', e);
+    }
+    return true;
+  }
+
+  function _loadCalibration() {
+    try {
+      const raw = localStorage.getItem('kousuan_cal_samples');
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed) || parsed.length < 10) return false;
+      calibrationSamples = parsed.map(s => ({
+        data: new Float32Array(s.data),
+        label: s.label,
+      }));
+      calibrated = true;
+      console.log(`[DigitNN] Calibration loaded: ${calibrationSamples.length} samples`);
+      return true;
+    } catch (e) {
+      console.warn('[DigitNN] Failed to load calibration:', e);
+      return false;
+    }
+  }
+
+  function clearCalibration() {
+    calibrationSamples = [];
+    calibrated = false;
+    localStorage.removeItem('kousuan_cal_samples');
+    if (typeof Storage !== 'undefined') Storage.clearCalibration();
+  }
+
+  function isCalibrated() { return calibrated; }
+  function getCalibrationSampleCount() { return calibrationSamples.length; }
 
   // ===== 持久化 =====
   function _save() {
@@ -452,6 +571,9 @@ const DigitRecognizer = (() => {
 
   // ===== 公共接口 =====
   async function init(onProgress) {
+    // 加载校准数据
+    _loadCalibration();
+
     if (ready) return true;
 
     // 尝试加载缓存权重
@@ -488,5 +610,9 @@ const DigitRecognizer = (() => {
   function getStatus() { return status; }
   function clearModel() { _clearCache(); ready = false; status = 'idle'; }
 
-  return { init, predict, isReady, getStatus, clearModel };
+  return {
+    init, predict, isReady, getStatus, clearModel,
+    addCalibrationSample, finishCalibration, clearCalibration,
+    isCalibrated, getCalibrationSampleCount,
+  };
 })();

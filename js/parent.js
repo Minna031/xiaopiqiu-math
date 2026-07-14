@@ -317,5 +317,107 @@ const Parent = (() => {
     URL.revokeObjectURL(url);
   }
 
-  return { verify, changePassword, logout, isAuth, renderSettings, renderReport, exportCSV };
+  // ---- 渲染识别报告 ----
+  function renderRecognition(container) {
+    const stats = Storage.getRecognitionStats();
+    const calInfo = Calibration ? Calibration.getCalibrationInfo() : null;
+    const isCalibrated = DigitRecognizer ? DigitRecognizer.isCalibrated() : false;
+    const sampleCount = DigitRecognizer ? DigitRecognizer.getCalibrationSampleCount() : 0;
+
+    const overallAccuracy = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
+
+    // 各数字识别准确率
+    const digitRows = [];
+    for (let d = 0; d <= 9; d++) {
+      const ds = stats.digitStats[String(d)];
+      if (!ds) continue;
+      const acc = ds.total > 0 ? Math.round((ds.correct / ds.total) * 100) : 0;
+      digitRows.push({ digit: d, total: ds.total, correct: ds.correct, accuracy: acc });
+    }
+
+    // 薄弱数字（准确率低于 70%）
+    const weakDigits = digitRows.filter(r => r.accuracy < 70 && r.total >= 3);
+
+    container.innerHTML = `
+      <div class="parent-report">
+        <h3>识别报告</h3>
+
+        <div class="report-overview">
+          <div class="stat-card">
+            <div class="stat-value">${isCalibrated ? '✅ 已校准' : '❌ 未校准'}</div>
+            <div class="stat-label">校准状态${sampleCount > 0 ? ` (${sampleCount}样本)` : ''}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${overallAccuracy}%</div>
+            <div class="stat-label">识别准确率</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${stats.total}</div>
+            <div class="stat-label">识别总次数</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${stats.correct}</div>
+            <div class="stat-label">正确识别</div>
+          </div>
+        </div>
+
+        <h4>各数字识别情况</h4>
+        ${digitRows.length === 0
+          ? '<div class="empty-state">暂无识别数据，请先练习并提交</div>'
+          : `<div class="digit-stats-table">
+              <div class="digit-stats-header">
+                <span>数字</span><span>次数</span><span>正确</span><span>准确率</span>
+              </div>
+              ${digitRows.map(r => `
+                <div class="digit-stats-row ${r.accuracy < 70 ? 'weak' : ''}">
+                  <span class="digit-label">${r.digit}</span>
+                  <span>${r.total}</span>
+                  <span>${r.correct}</span>
+                  <span class="digit-acc ${r.accuracy >= 80 ? 'good' : r.accuracy >= 60 ? 'mid' : 'bad'}">${r.accuracy}%</span>
+                </div>
+              `).join('')}
+            </div>`
+        }
+
+        ${weakDigits.length > 0 ? `
+          <h4>⚠️ 薄弱数字</h4>
+          <div class="weak-digits">
+            ${weakDigits.map(w => `
+              <div class="weak-item">
+                <span class="weak-digit">${w.digit}</span>
+                <span class="weak-info">识别率 ${w.accuracy}%（${w.correct}/${w.total}）</span>
+              </div>
+            `).join('')}
+            <p style="font-size:0.85em;color:var(--text-light);margin-top:8px;">
+              建议通过校准训练提高这些数字的识别准确率
+            </p>
+          </div>
+        ` : ''}
+
+        <div class="report-actions">
+          <button class="btn-action" id="clear-recognition-btn">清除识别数据</button>
+          ${!isCalibrated ? '<button class="btn-action primary" id="start-calibration-btn">开始校准</button>' : ''}
+        </div>
+      </div>
+    `;
+
+    // 绑定事件
+    const clearBtn = container.querySelector('#clear-recognition-btn');
+    if (clearBtn) {
+      clearBtn.onclick = () => {
+        if (confirm('确定清除所有识别统计数据吗？')) {
+          Storage.clearRecognitionStats();
+          renderRecognition(container);
+        }
+      };
+    }
+    const calBtn = container.querySelector('#start-calibration-btn');
+    if (calBtn) {
+      calBtn.onclick = () => {
+        if (typeof Calibration !== 'undefined') Calibration.start();
+      };
+    }
+  }
+
+  return { verify, changePassword, logout, isAuth, renderSettings, renderReport, renderRecognition, exportCSV };
 })();

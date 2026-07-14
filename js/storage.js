@@ -7,6 +7,8 @@ const Storage = (() => {
     ERROR_BOOK: 'kousuan_error_book',
     HISTORY: 'kousuan_history',
     PASSWORD: 'kousuan_password',
+    CALIBRATION: 'kousuan_calibration',
+    RECOGNITION_STATS: 'kousuan_recognition_stats',
   };
 
   const DEFAULT_SETTINGS = {
@@ -110,12 +112,55 @@ const Storage = (() => {
     return _set(KEYS.PASSWORD, newPassword);
   }
 
+  // ---- 校准数据 ----
+  function getCalibration() {
+    return _get(KEYS.CALIBRATION, null);
+  }
+
+  function saveCalibration(data) {
+    return _set(KEYS.CALIBRATION, data);
+  }
+
+  function clearCalibration() {
+    localStorage.removeItem(KEYS.CALIBRATION);
+  }
+
+  // ---- 识别统计 ----
+  function getRecognitionStats() {
+    return _get(KEYS.RECOGNITION_STATS, {
+      total: 0, correct: 0,
+      digitStats: {},  // { "0": { total: 0, correct: 0 }, ... }
+      recentResults: [],  // 最近 50 条
+    });
+  }
+
+  function addRecognitionResult(digit, predicted, confidence, engine) {
+    const stats = getRecognitionStats();
+    stats.total++;
+    const isCorrect = digit === predicted;
+    if (isCorrect) stats.correct++;
+    // 按数字统计
+    if (!stats.digitStats[digit]) stats.digitStats[digit] = { total: 0, correct: 0 };
+    stats.digitStats[digit].total++;
+    if (isCorrect) stats.digitStats[digit].correct++;
+    // 最近记录
+    stats.recentResults.push({ digit, predicted, confidence, engine, correct: isCorrect, time: Date.now() });
+    if (stats.recentResults.length > 50) stats.recentResults.shift();
+    return _set(KEYS.RECOGNITION_STATS, stats);
+  }
+
+  function clearRecognitionStats() {
+    localStorage.removeItem(KEYS.RECOGNITION_STATS);
+  }
+
   // ---- 数据导出 ----
   function exportAllData() {
     return {
       settings: getSettings(),
       errorBook: getErrorBook(),
       history: getHistory(),
+      calibration: getCalibration(),
+      recognitionStats: getRecognitionStats(),
     };
   }
 
@@ -136,6 +181,12 @@ const Storage = (() => {
     saveHistory,
     getPassword,
     setPassword,
+    getCalibration,
+    saveCalibration,
+    clearCalibration,
+    getRecognitionStats,
+    addRecognitionResult,
+    clearRecognitionStats,
     exportAllData,
     clearAllData,
   };
