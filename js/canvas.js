@@ -347,13 +347,11 @@ const CanvasManager = (() => {
   function drawPrintedDigit(areaIndex, digit) {
     const area = answerAreas.find(a => a.index === areaIndex);
     if (!area || digit == null) return;
-    // 清除之前的印刷体（旧印刷体区域将恢复为手写笔迹，因为 strokes 未被删除）
-    printedDigits = {};
     // 清除当前区域的手写笔画（将被印刷体替代）
     strokes = strokes.filter(s => s.areaIndex !== areaIndex);
-    // 记录新的印刷体数字
+    // 记录该区域的印刷体数字（保留所有已识别的）
     printedDigits[areaIndex] = digit;
-    // 重绘整个画布（旧印刷体区域恢复手写，新区域显示印刷体）
+    // 重绘整个画布（所有印刷体数字都会保留）
     redraw();
   }
 
